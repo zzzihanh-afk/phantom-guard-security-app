@@ -39,11 +39,12 @@ class PhantomSecurityForegroundService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        startForegroundWithNotification()
         val action = intent?.action ?: ACTION_START_PROTECTION
 
         when (action) {
             ACTION_START_PROTECTION -> {
-                startForegroundWithNotification()
+                // Foreground notification active
             }
             ACTION_STOP_PROTECTION -> {
                 stopForeground(STOP_FOREGROUND_REMOVE)
@@ -131,11 +132,17 @@ class PhantomSecurityForegroundService : Service() {
 
     private fun executeHardwareLock() {
         val dpm = getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
-        try {
-            dpm.lockNow()
-            Log.i(TAG, "Device lock executed successfully via DevicePolicyManager.")
-        } catch (e: SecurityException) {
-            Log.e(TAG, "Cannot lock device: App is not active Device Administrator.", e)
+        val adminComponent = android.content.ComponentName(this, com.phantomguard.security.receiver.PhantomDeviceAdminReceiver::class.java)
+        if (dpm.isAdminActive(adminComponent)) {
+            try {
+                dpm.lockNow()
+                Log.i(TAG, "Device lock executed successfully via DevicePolicyManager.")
+            } catch (e: Exception) {
+                Log.e(TAG, "Cannot lock device: ${e.message}", e)
+            }
+        } else {
+            Log.w(TAG, "Cannot lock device: App is not active Device Administrator. Triggering warning siren.")
+            triggerAudibleSiren()
         }
     }
 

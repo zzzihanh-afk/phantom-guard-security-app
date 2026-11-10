@@ -35,7 +35,7 @@ class FirestoreSyncManager(private val context: Context) {
     private var syncJob: Job? = null
 
     val projectId: String
-        get() = dbHelper.getConfig("firebase_project_id", "phantom-guard-security")
+        get() = dbHelper.getConfig("firebase_project_id", "phantom-guard-security-app")
 
     fun startContinuousSync() {
         if (syncJob?.isActive == true) return
@@ -47,7 +47,7 @@ class FirestoreSyncManager(private val context: Context) {
                 } catch (e: Exception) {
                     Log.w(TAG, "Cloud Firestore sync pass: ${e.message}")
                 }
-                delay(30_000) // Poll / sync heartbeat every 30 seconds
+                delay(3000) // Poll / sync heartbeat every 3 seconds for instant response
             }
         }
     }
@@ -59,6 +59,8 @@ class FirestoreSyncManager(private val context: Context) {
 
     fun updateProjectId(newProjectId: String) {
         dbHelper.setConfig("firebase_project_id", newProjectId)
+        stopContinuousSync()
+        startContinuousSync()
         scope.launch {
             syncLocalDeviceState()
         }
@@ -114,7 +116,7 @@ class FirestoreSyncManager(private val context: Context) {
     suspend fun checkAndExecuteRemoteCommands(): Int = withContext(Dispatchers.IO) {
         var executedCount = 0
         try {
-            val urlString = "https://firestore.googleapis.com/v1/projects/$projectId/databases/(default)/documents/remoteCommands"
+            val urlString = "https://firestore.googleapis.com/v1/projects/$projectId/databases/(default)/documents/remoteCommands?pageSize=100"
             val url = URL(urlString)
             val conn = (url.openConnection() as HttpURLConnection).apply {
                 requestMethod = "GET"
@@ -130,6 +132,7 @@ class FirestoreSyncManager(private val context: Context) {
                 if (documents != null) {
                     for (i in 0 until documents.length()) {
                         val doc = documents.getJSONObject(i)
+                        val docName = doc.optString("name")
                         val fields = doc.optJSONObject("fields") ?: continue
                         val status = fields.optJSONObject("status")?.optString("stringValue") ?: ""
                         val commandType = fields.optJSONObject("commandType")?.optString("stringValue") ?: ""
@@ -139,6 +142,9 @@ class FirestoreSyncManager(private val context: Context) {
                             if (!dbHelper.isNonceUsed(nonce)) {
                                 dbHelper.markNonceUsed(nonce)
                                 executeCommandLocally(commandType)
+                                if (docName.isNotBlank()) {
+                                    markCommandExecutedInFirestore(docName)
+                                }
                                 executedCount++
                             }
                         }
@@ -152,26 +158,78 @@ class FirestoreSyncManager(private val context: Context) {
         executedCount
     }
 
+    private fun markCommandExecutedInFirestore(docName: String) {
+        scope.launch(Dispatchers.IO) {
+            try {
+                val url = URL("https://firestore.googleapis.com/v1/$docName?updateMask.fieldPaths=status")
+                val conn = (url.openConnection() as HttpURLConnection).apply {
+                    requestMethod = "PATCH"
+                    doOutput = true
+                    setRequestProperty("Content-Type", "application/json")
+                    connectTimeout = 4000
+                    readTimeout = 4000
+                }
+                val body = JSONObject().apply {
+                    put("fields", JSONObject().apply {
+                        put("status", JSONObject().put("stringValue", "EXECUTED"))
+                    })
+                }
+                OutputStreamWriter(conn.outputStream).use { it.write(body.toString()) }
+                conn.responseCode
+                conn.disconnect()
+            } catch (e: Exception) {
+                // ignore
+            }
+        }
+    }
+
     private fun executeCommandLocally(commandType: String) {
         Log.i(TAG, "Executing received remote command: $commandType")
-        when (commandType) {
-            "LOCK" -> {
-                val intent = Intent(context, PhantomSecurityForegroundService::class.java).apply {
-                    action = PhantomSecurityForegroundService.ACTION_LOCK_DEVICE
+        when (commandType.uppercase()) {
+            "LOCK", "LOCK_DEVICE", "EMERGENCY_LOCKDOWN", "STOLEN_MODE" -> {
+                // 1. Immediate direct hardware lock attempt via DevicePolicyManager
+                try {
+                    val dpm = context.getSystemService(Context.DEVICE_POLICY_SERVICE) as? android.app.admin.DevicePolicyManager
+                    val adminComponent = android.content.ComponentName(context, com.phantomguard.security.receiver.PhantomDeviceAdminReceiver::class.java)
+                    if (dpm != null && dpm.isAdminActive(adminComponent)) {
+                        dpm.lockNow()
+                        Log.i(TAG, "Hardware lock successfully executed via DevicePolicyManager.")
+                    } else {
+                        Log.w(TAG, "Device Administrator not granted yet.")
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "Device lock direct error: ${e.message}")
                 }
-                context.startService(intent)
+
+                // 2. Dispatch to Foreground Service via ContextCompat
+                try {
+                    val intent = Intent(context, PhantomSecurityForegroundService::class.java).apply {
+                        action = PhantomSecurityForegroundService.ACTION_LOCK_DEVICE
+                    }
+                    androidx.core.content.ContextCompat.startForegroundService(context, intent)
+                } catch (e: Exception) {
+                    Log.w(TAG, "Service start note: ${e.message}")
+                }
             }
             "ALARM" -> {
-                val intent = Intent(context, PhantomSecurityForegroundService::class.java).apply {
-                    action = PhantomSecurityForegroundService.ACTION_TRIGGER_ALARM
+                try {
+                    val intent = Intent(context, PhantomSecurityForegroundService::class.java).apply {
+                        action = PhantomSecurityForegroundService.ACTION_TRIGGER_ALARM
+                    }
+                    androidx.core.content.ContextCompat.startForegroundService(context, intent)
+                } catch (e: Exception) {
+                    Log.w(TAG, "Alarm start note: ${e.message}")
                 }
-                context.startService(intent)
             }
             "STOP_ALARM" -> {
-                val intent = Intent(context, PhantomSecurityForegroundService::class.java).apply {
-                    action = PhantomSecurityForegroundService.ACTION_STOP_ALARM
+                try {
+                    val intent = Intent(context, PhantomSecurityForegroundService::class.java).apply {
+                        action = PhantomSecurityForegroundService.ACTION_STOP_ALARM
+                    }
+                    androidx.core.content.ContextCompat.startForegroundService(context, intent)
+                } catch (e: Exception) {
+                    Log.w(TAG, "Alarm stop note: ${e.message}")
                 }
-                context.startService(intent)
             }
         }
     }
