@@ -134,11 +134,18 @@ fun RemoteControlScreen(
                     icon = Icons.Default.Lock,
                     modifier = Modifier.weight(1f),
                     onClick = {
-                        val intent = Intent(context, PhantomSecurityForegroundService::class.java).apply {
-                            action = PhantomSecurityForegroundService.ACTION_LOCK_DEVICE
+                        val dpm = context.getSystemService(Context.DEVICE_POLICY_SERVICE) as? android.app.admin.DevicePolicyManager
+                        val adminComponent = android.content.ComponentName(context, com.phantomguard.security.receiver.PhantomDeviceAdminReceiver::class.java)
+                        if (dpm != null && dpm.isAdminActive(adminComponent)) {
+                            try {
+                                dpm.lockNow()
+                                lastCommandStatus = "Device hardware locked successfully"
+                            } catch (e: Exception) {
+                                lastCommandStatus = "Lock error: ${e.message}"
+                            }
+                        } else {
+                            lastCommandStatus = "Device Administrator permission is required"
                         }
-                        context.startService(intent)
-                        lastCommandStatus = "LOCK executed at ${System.currentTimeMillis() % 10000}"
                     }
                 )
 

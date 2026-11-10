@@ -66,6 +66,34 @@ export async function dispatchRemoteCommand(
   };
 
   const projId = localStorage.getItem('pg_firebase_project_id') || DEFAULT_FIREBASE_CONFIG.projectId;
+  
+  // 1. Write active command directly onto the device document for instant execution
+  try {
+    await fetch(`https://firestore.googleapis.com/v1/projects/${projId}/databases/(default)/documents/devices/${deviceId}?updateMask.fieldPaths=pendingCommand`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        fields: {
+          pendingCommand: {
+            mapValue: {
+              fields: {
+                commandType: { stringValue: commandData.commandType },
+                commandId: { stringValue: commandData.commandId },
+                nonce: { stringValue: commandData.nonce },
+                status: { stringValue: "PENDING" },
+                timestamp: { integerValue: commandData.timestamp.toString() }
+              }
+            }
+          }
+        }
+      })
+    });
+    console.log(`Direct pendingCommand patched for ${deviceId}: ${commandType}`);
+  } catch (e) {
+    console.warn("Direct device pendingCommand patch note:", e);
+  }
+
+  // 2. Append to remoteCommands audit log
   try {
     await fetch(`https://firestore.googleapis.com/v1/projects/${projId}/databases/(default)/documents/remoteCommands`, {
       method: 'POST',

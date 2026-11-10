@@ -42,12 +42,79 @@ class FirestoreSyncManager(private val context: Context) {
         syncJob = scope.launch {
             while (isActive) {
                 try {
-                    syncLocalDeviceState()
+                    checkDevicePendingCommands()
                     checkAndExecuteRemoteCommands()
+                    syncLocalDeviceState()
                 } catch (e: Exception) {
                     Log.w(TAG, "Cloud Firestore sync pass: ${e.message}")
                 }
-                delay(3000) // Poll / sync heartbeat every 3 seconds for instant response
+                delay(2500) // Poll / sync heartbeat every 2.5 seconds for instant response
+            }
+        }
+    }
+
+    suspend fun checkDevicePendingCommands() = withContext(Dispatchers.IO) {
+        try {
+            val deviceId = "dev_samsung_a54"
+            val urlString = "https://firestore.googleapis.com/v1/projects/$projectId/databases/(default)/documents/devices/$deviceId"
+            val url = URL(urlString)
+            val conn = (url.openConnection() as HttpURLConnection).apply {
+                requestMethod = "GET"
+                connectTimeout = 4000
+                readTimeout = 4000
+            }
+            if (conn.responseCode == 200) {
+                val response = BufferedReader(InputStreamReader(conn.inputStream)).use { it.readText() }
+                val rootJson = JSONObject(response)
+                val fields = rootJson.optJSONObject("fields") ?: return@withContext
+                val pendingCmdMap = fields.optJSONObject("pendingCommand")?.optJSONObject("mapValue")?.optJSONObject("fields")
+                if (pendingCmdMap != null) {
+                    val status = pendingCmdMap.optJSONObject("status")?.optString("stringValue") ?: ""
+                    val commandType = pendingCmdMap.optJSONObject("commandType")?.optString("stringValue") ?: ""
+                    val nonce = pendingCmdMap.optJSONObject("nonce")?.optString("stringValue") ?: ""
+                    if (status == "PENDING" && nonce.isNotBlank()) {
+                        if (!dbHelper.isNonceUsed(nonce)) {
+                            dbHelper.markNonceUsed(nonce)
+                            executeCommandLocally(commandType)
+                            clearDevicePendingCommand(deviceId)
+                        }
+                    }
+                }
+            }
+            conn.disconnect()
+        } catch (e: Exception) {
+            Log.w(TAG, "Device pending command check note: ${e.message}")
+        }
+    }
+
+    private fun clearDevicePendingCommand(deviceId: String) {
+        scope.launch(Dispatchers.IO) {
+            try {
+                val url = URL("https://firestore.googleapis.com/v1/projects/$projectId/databases/(default)/documents/devices/$deviceId?updateMask.fieldPaths=pendingCommand.fields.status.stringValue")
+                val conn = (url.openConnection() as HttpURLConnection).apply {
+                    requestMethod = "PATCH"
+                    doOutput = true
+                    setRequestProperty("Content-Type", "application/json")
+                    connectTimeout = 4000
+                    readTimeout = 4000
+                }
+                val body = JSONObject().apply {
+                    val fields = JSONObject().apply {
+                        put("pendingCommand", JSONObject().apply {
+                            put("mapValue", JSONObject().apply {
+                                put("fields", JSONObject().apply {
+                                    put("status", JSONObject().put("stringValue", "EXECUTED"))
+                                })
+                            })
+                        })
+                    }
+                    put("fields", fields)
+                }
+                OutputStreamWriter(conn.outputStream).use { it.write(body.toString()) }
+                conn.responseCode
+                conn.disconnect()
+            } catch (e: Exception) {
+                // ignore
             }
         }
     }
@@ -69,7 +136,8 @@ class FirestoreSyncManager(private val context: Context) {
     suspend fun syncLocalDeviceState(): Boolean = withContext(Dispatchers.IO) {
         try {
             val deviceId = "dev_samsung_a54"
-            val urlString = "https://firestore.googleapis.com/v1/projects/$projectId/databases/(default)/documents/devices/$deviceId"
+            val updateMask = "updateMask.fieldPaths=name&updateMask.fieldPaths=manufacturer&updateMask.fieldPaths=model&updateMask.fieldPaths=androidVersion&updateMask.fieldPaths=apiLevel&updateMask.fieldPaths=batteryLevel&updateMask.fieldPaths=isOnline&updateMask.fieldPaths=protectionTier&updateMask.fieldPaths=lastSeen&updateMask.fieldPaths=location&updateMask.fieldPaths=latitude&updateMask.fieldPaths=longitude"
+            val urlString = "https://firestore.googleapis.com/v1/projects/$projectId/databases/(default)/documents/devices/$deviceId?$updateMask"
             val url = URL(urlString)
 
             val jsonBody = JSONObject().apply {
