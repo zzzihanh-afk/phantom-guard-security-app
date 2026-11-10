@@ -1,0 +1,6 @@
+<resources>
+    <string name="app_name">Phantom Guard</string>
+    <string name="app_tagline">LOCK • TRACK • PROTECT</string>
+    <string name="device_admin_label">Phantom Guard Security Administrator</string>
+    <string name="device_admin_description">Phantom Guard Device Policy Controller protects your device against theft, enforces anti-tamper safeguards, and enables cryptographically authenticated remote lock and enterprise recovery.</string>
+</resources>

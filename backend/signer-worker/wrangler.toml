@@ -1,0 +1,7 @@
+name = "phantom-guard-command-signer"
+main = "src/index.ts"
+compatibility_date = "2024-11-01"
+
+[vars]
+ENVIRONMENT = "production"
+MAX_COMMAND_VALIDITY_SECONDS = "900"

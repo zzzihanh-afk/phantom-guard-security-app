@@ -1,0 +1,121 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isGlobalMasterAdmin() {
+      return isAuthenticated() &&
+        exists(/databases/$(database)/documents/userRoles/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/userRoles/$(request.auth.uid)).data.role == "global_master_admin";
+    }
+
+    function isDeviceOwner(deviceId) {
+      return isAuthenticated() &&
+        exists(/databases/$(database)/documents/devices/$(deviceId)) &&
+        get(/databases/$(database)/documents/devices/$(deviceId)).data.ownerId == request.auth.uid;
+    }
+
+    // User profiles
+    match /users/{userId} {
+      allow read: if isOwner(userId) || isGlobalMasterAdmin();
+      allow create: if isOwner(userId) && request.resource.data.role == "registered_admin";
+      allow update: if (isOwner(userId) && request.resource.data.role == resource.data.role) || isGlobalMasterAdmin();
+      allow delete: if isOwner(userId) || isGlobalMasterAdmin();
+    }
+
+    // Role definitions (Immutable by ordinary users)
+    match /userRoles/{userId} {
+      allow read: if isOwner(userId) || isGlobalMasterAdmin();
+      allow write: if isGlobalMasterAdmin();
+    }
+
+    // Enrolled devices
+    match /devices/{deviceId} {
+      allow read: if (isAuthenticated() && resource.data.ownerId == request.auth.uid) || isGlobalMasterAdmin();
+      allow create: if isAuthenticated() && request.resource.data.ownerId == request.auth.uid;
+      allow update: if (isAuthenticated() && resource.data.ownerId == request.auth.uid) || isGlobalMasterAdmin();
+      allow delete: if isAuthenticated() && resource.data.ownerId == request.auth.uid;
+    }
+
+    // Device capabilities
+    match /deviceCapabilities/{deviceId} {
+      allow read: if isDeviceOwner(deviceId) || isGlobalMasterAdmin();
+      allow write: if isDeviceOwner(deviceId);
+    }
+
+    // Remote commands
+    match /remoteCommands/{commandId} {
+      allow read: if (isAuthenticated() && resource.data.ownerId == request.auth.uid) || isGlobalMasterAdmin();
+      allow create: if isAuthenticated() && 
+                    request.resource.data.ownerId == request.auth.uid &&
+                    isDeviceOwner(request.resource.data.deviceId);
+      allow update: if isDeviceOwner(resource.data.deviceId) || isGlobalMasterAdmin();
+      allow delete: if isOwner(resource.data.ownerId);
+    }
+
+    // Command results
+    match /commandResults/{resultId} {
+      allow read: if isAuthenticated() && isDeviceOwner(resource.data.deviceId);
+      allow create: if isAuthenticated();
+      allow update: if false;
+      allow delete: if isGlobalMasterAdmin();
+    }
+
+    // Location records
+    match /locationRecords/{recordId} {
+      allow read: if isDeviceOwner(resource.data.deviceId) || isGlobalMasterAdmin();
+      allow create: if isDeviceOwner(request.resource.data.deviceId);
+      allow delete: if isDeviceOwner(resource.data.deviceId);
+    }
+
+    // Security alerts
+    match /securityAlerts/{alertId} {
+      allow read: if (isAuthenticated() && resource.data.ownerId == request.auth.uid) || isGlobalMasterAdmin();
+      allow create: if isAuthenticated();
+      allow update: if (isAuthenticated() && resource.data.ownerId == request.auth.uid) || isGlobalMasterAdmin();
+      allow delete: if isOwner(resource.data.ownerId);
+    }
+
+    // SIM card events
+    match /simEvents/{eventId} {
+      allow read: if isDeviceOwner(resource.data.deviceId) || isGlobalMasterAdmin();
+      allow create: if isDeviceOwner(request.resource.data.deviceId);
+      allow delete: if isDeviceOwner(resource.data.deviceId);
+    }
+
+    // Recovery conversations
+    match /recoveryConversations/{conversationId} {
+      allow read: if true; // Public access for device finder to communicate without auth
+      allow create: if isAuthenticated();
+      allow update: if true;
+    }
+
+    // Evidence vault
+    match /evidenceVault/{evidenceId} {
+      allow read: if isOwner(resource.data.ownerId) || isGlobalMasterAdmin();
+      allow create: if isOwner(request.resource.data.ownerId);
+      allow update: if false; // Evidence is immutable once written
+      allow delete: if isOwner(resource.data.ownerId);
+    }
+
+    // Global Admin audit logs
+    match /adminAuditLogs/{logId} {
+      allow read: if isGlobalMasterAdmin();
+      allow write: if isGlobalMasterAdmin();
+    }
+
+    // Platform settings
+    match /platformSettings/{settingId} {
+      allow read: if isAuthenticated();
+      allow write: if isGlobalMasterAdmin();
+    }
+  }
+}

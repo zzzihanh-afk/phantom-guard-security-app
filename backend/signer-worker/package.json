@@ -1,0 +1,16 @@
+{
+  "name": "phantom-guard-signer-worker",
+  "version": "1.0.0",
+  "description": "Zero-cost Cloudflare Worker for cryptographic ECDSA P-256 remote command signing",
+  "main": "src/index.ts",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20241108.0",
+    "typescript": "^5.6.3",
+    "wrangler": "^3.86.0"
+  }
+}

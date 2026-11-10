@@ -1,0 +1,108 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <!-- Essential Security & Remote Protection Permissions -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+
+    <!-- Location Monitoring (Consent-based) -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
+
+    <!-- SIM State Monitoring -->
+    <uses-permission android:name="android.permission.READ_PHONE_STATE" />
+
+    <!-- Evidence Vault Snapshot (Consent-based on unauthorized tampering) -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+
+    <!-- Stolen Mode Emergency Alarm & Overlay -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <uses-permission android:name="android.permission.VIBRATE" />
+
+    <application
+        android:name=".PhantomGuardApplication"
+        android:allowBackup="false"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.PhantomGuard"
+        tools:targetApi="35">
+
+        <!-- Main Launcher Activity -->
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:windowSoftInputMode="adjustResize"
+            android:theme="@style/Theme.PhantomGuard">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!-- Device Policy Controller (Device Admin Receiver) -->
+        <receiver
+            android:name=".receiver.PhantomDeviceAdminReceiver"
+            android:permission="android.permission.BIND_DEVICE_ADMIN"
+            android:exported="true"
+            android:label="@string/device_admin_label"
+            android:description="@string/device_admin_description">
+            <meta-data
+                android:name="android.app.device_admin"
+                android:resource="@xml/device_admin_policies" />
+            <intent-filter>
+                <action android:name="android.app.action.DEVICE_ADMIN_ENABLED" />
+                <action android:name="android.app.action.DEVICE_ADMIN_DISABLE_REQUESTED" />
+                <action android:name="android.app.action.DEVICE_ADMIN_DISABLED" />
+                <action android:name="android.app.action.ACTION_PASSWORD_FAILED" />
+                <action android:name="android.app.action.ACTION_PASSWORD_SUCCEEDED" />
+            </intent-filter>
+        </receiver>
+
+        <!-- Boot Completed Receiver for instant protection restoration -->
+        <receiver
+            android:name=".receiver.BootCompletedReceiver"
+            android:exported="true"
+            android:directBootAware="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.LOCKED_BOOT_COMPLETED" />
+                <action android:name="android.intent.action.QUICKBOOT_POWERON" />
+            </intent-filter>
+        </receiver>
+
+        <!-- SIM Card State Change Detection Receiver -->
+        <receiver
+            android:name=".receiver.SimStateChangeReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.SIM_STATE_CHANGED" />
+                <action android:name="android.intent.action.SIM_CARD_STATE_CHANGED" />
+            </intent-filter>
+        </receiver>
+
+        <!-- Core Security Background Service -->
+        <service
+            android:name=".service.PhantomSecurityForegroundService"
+            android:foregroundServiceType="location|specialUse"
+            android:exported="false">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Anti-theft device protection, command processing, and telemetry heartbeat" />
+        </service>
+
+    </application>
+
+</manifest>
